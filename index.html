@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f766e" />
+  <title>الجرد — مسح الباركود</title>
+
+  <!-- Tajawal Arabic font -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;900&display=swap" rel="stylesheet" />
+
+  <!-- html5-qrcode barcode/QR scanner (CDN, no build step) -->
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+
+  <style>
+    /* ---------- Design tokens ---------- */
+    :root {
+      --bg: #f1f5f9;
+      --card: #ffffff;
+      --ink: #0f172a;
+      --muted: #64748b;
+      --brand: #0f766e;         /* teal */
+      --brand-dark: #115e59;
+      --ok: #16a34a;
+      --warn: #d97706;
+      --danger: #dc2626;
+      --line: #e2e8f0;
+      --radius: 16px;
+      --tap: 52px;              /* min tap target (> 48px requirement) */
+    }
+
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: 'Tajawal', system-ui, -apple-system, sans-serif;
+      font-size: 16px;                 /* >=16px prevents iOS auto-zoom */
+      -webkit-text-size-adjust: 100%;
+    }
+
+    /* App shell: safe-area aware for iPhone notch */
+    .app {
+      min-height: 100vh;
+      min-height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    }
+
+    header.bar {
+      background: var(--brand);
+      color: #fff;
+      padding: 14px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    header.bar .title { font-weight: 900; font-size: 18px; }
+    header.bar .who   { font-size: 13px; opacity: .9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 55%; }
+
+    main { flex: 1; padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+
+    .screen { display: none; flex-direction: column; gap: 16px; animation: fade .2s ease; }
+    .screen.active { display: flex; }
+    @keyframes fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 18px;
+    }
+
+    label { display: block; font-weight: 700; margin-bottom: 8px; font-size: 15px; }
+
+    input[type="text"], input[type="tel"] {
+      width: 100%;
+      height: var(--tap);
+      font-size: 18px;                 /* >=16px */
+      font-family: inherit;
+      padding: 0 14px;
+      border: 2px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+      color: var(--ink);
+      text-align: right;
+    }
+    input:focus { outline: none; border-color: var(--brand); }
+
+    .btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      width: 100%;
+      min-height: var(--tap);
+      font-family: inherit;
+      font-weight: 700;
+      font-size: 18px;
+      border: none;
+      border-radius: 14px;
+      padding: 12px 16px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .btn:active { transform: scale(.99); }
+    .btn.primary   { background: var(--brand); color: #fff; }
+    .btn.primary:active { background: var(--brand-dark); }
+    .btn.ghost     { background: #fff; color: var(--brand); border: 2px solid var(--brand); }
+    .btn.warn      { background: var(--warn); color: #fff; }
+    .btn.danger    { background: var(--danger); color: #fff; }
+    .btn.big       { font-size: 22px; min-height: 68px; }
+    .btn:disabled  { opacity: .5; cursor: not-allowed; }
+
+    .row { display: flex; gap: 10px; }
+    .row > * { flex: 1; }
+
+    .hint { color: var(--muted); font-size: 14px; line-height: 1.6; }
+
+    /* ---------- Scanner ---------- */
+    #reader {
+      width: 100%;
+      border-radius: var(--radius);
+      overflow: hidden;
+      background: #000;
+      min-height: 260px;
+    }
+    #reader video { border-radius: var(--radius); }
+
+    /* ---------- Result panel ---------- */
+    .result {
+      background: #ecfdf5;
+      border: 2px solid #a7f3d0;
+      border-radius: var(--radius);
+      padding: 16px;
+    }
+    .result .code {
+      font-size: 26px;
+      font-weight: 900;
+      direction: ltr;                  /* barcodes read LTR */
+      text-align: center;
+      letter-spacing: 1px;
+      word-break: break-all;
+    }
+    .result .name { text-align: center; font-size: 17px; margin-top: 6px; }
+    .result .name.unknown { color: var(--warn); }
+
+    /* Quantity stepper */
+    .qty {
+      display: flex;
+      align-items: stretch;
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .qty button {
+      width: 64px;
+      min-height: 64px;
+      font-size: 32px;
+      font-weight: 900;
+      border: none;
+      border-radius: 14px;
+      background: var(--brand);
+      color: #fff;
+      cursor: pointer;
+    }
+    .qty button:active { background: var(--brand-dark); }
+    .qty input {
+      flex: 1;
+      height: 64px;
+      font-size: 30px;
+      font-weight: 900;
+      text-align: center;
+      border: 2px solid var(--line);
+      border-radius: 14px;
+    }
+
+    /* Duplicate warning banner */
+    .dup {
+      display: none;
+      background: #fffbeb;
+      border: 2px solid #fde68a;
+      color: #92400e;
+      border-radius: 12px;
+      padding: 12px 14px;
+      font-weight: 700;
+      font-size: 15px;
+      margin-top: 12px;
+    }
+    .dup.show { display: block; }
+
+    /* Toast */
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: 24px;
+      transform: translateX(-50%) translateY(20px);
+      background: var(--ink);
+      color: #fff;
+      padding: 12px 20px;
+      border-radius: 999px;
+      font-weight: 700;
+      font-size: 15px;
+      opacity: 0;
+      pointer-events: none;
+      transition: all .25s ease;
+      z-index: 50;
+      max-width: 90vw;
+      text-align: center;
+    }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    .toast.err { background: var(--danger); }
+    .toast.ok  { background: var(--ok); }
+
+    /* Config-URL banner (setup safety) */
+    .setup-warn {
+      background: #fef2f2;
+      border: 2px solid #fecaca;
+      color: #991b1b;
+      border-radius: 12px;
+      padding: 12px 14px;
+      font-size: 14px;
+      font-weight: 700;
+      line-height: 1.7;
+    }
+
+    .stat { display: flex; justify-content: space-between; gap: 10px; }
+    .stat .box {
+      flex: 1;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 10px;
+      text-align: center;
+    }
+    .stat .box .n { font-size: 24px; font-weight: 900; color: var(--brand); }
+    .stat .box .l { font-size: 13px; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="bar">
+      <span class="title">📦 الجرد</span>
+      <span class="who" id="whoLabel"></span>
+    </header>
+
+    <main>
+      <!-- ============ SCREEN 1: SESSION START ============ -->
+      <section id="screen-session" class="screen active">
+        <div id="setupWarn" class="setup-warn" style="display:none;">
+          ⚠️ لم يتم ضبط رابط الخادم بعد. افتح ملف <b>index.html</b> وضع رابط تطبيق Apps Script في المتغيّر <b>APPS_SCRIPT_URL</b> بأعلى الكود.
+        </div>
+
+        <div class="card">
+          <label for="userName">اسم الموظف</label>
+          <input type="text" id="userName" placeholder="مثال: أحمد" autocomplete="name" />
+        </div>
+
+        <div class="card">
+          <label for="location">الموقع (الفرع / الممر)</label>
+          <input type="text" id="location" placeholder="مثال: فرع الرياض - ممر 3" />
+        </div>
+
+        <button class="btn primary big" id="startSessionBtn">ابدأ المسح ▶</button>
+        <p class="hint">سيتم حفظ الاسم والموقع على هذا الجهاز حتى لا تُدخلهما في كل مرة.</p>
+      </section>
+
+      <!-- ============ SCREEN 2: SCAN LOOP ============ -->
+      <section id="screen-scan" class="screen">
+        <!-- Live session stats -->
+        <div class="stat">
+          <div class="box"><div class="n" id="statItems">0</div><div class="l">عدد الأصناف</div></div>
+          <div class="box"><div class="n" id="statQty">0</div><div class="l">إجمالي الكمية</div></div>
+        </div>
+
+        <!-- Camera scanner -->
+        <div id="scannerWrap">
+          <div id="reader"></div>
+          <p class="hint" id="scanHint">وجّه الكاميرا نحو الباركود…</p>
+        </div>
+
+        <!-- Result + quantity entry (hidden until a scan lands) -->
+        <div id="resultWrap" style="display:none;">
+          <div class="result">
+            <div class="code" id="resCode">—</div>
+            <div class="name" id="resName">—</div>
+
+            <div class="dup" id="dupWarn"></div>
+
+            <div class="qty">
+              <button type="button" id="qtyMinus" aria-label="نقص">−</button>
+              <input type="tel" inputmode="numeric" id="qtyInput" value="1" />
+              <button type="button" id="qtyPlus" aria-label="زيادة">+</button>
+            </div>
+          </div>
+
+          <div class="row" style="margin-top:14px;">
+            <button class="btn ghost" id="cancelScanBtn">إلغاء</button>
+            <button class="btn primary" id="saveBtn">حفظ ومسح التالي ✓</button>
+          </div>
+        </div>
+
+        <!-- Manual entry fallback -->
+        <details class="card" id="manualCard">
+          <summary style="font-weight:700; cursor:pointer;">⌨️ إدخال الباركود يدويًا</summary>
+          <div style="margin-top:12px;">
+            <input type="tel" inputmode="numeric" id="manualBarcode" placeholder="اكتب رقم الباركود" />
+            <button class="btn ghost" id="manualGoBtn" style="margin-top:10px;">استخدام هذا الباركود</button>
+          </div>
+        </details>
+
+        <button class="btn ghost" id="endSessionBtn">إنهاء الجلسة</button>
+      </section>
+    </main>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+  /* ============================================================
+   *  الجرد — Inventory scan app (Phase 1)
+   *  Set your deployed Apps Script Web App URL below. This is the
+   *  ONLY endpoint the frontend talks to.
+   * ============================================================ */
+  const APPS_SCRIPT_URL = "PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE";
+
+  /* ---------- Small helpers ---------- */
+  const $ = (id) => document.getElementById(id);
+  const LS = {
+    get: (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
+    set: (k, v) => localStorage.setItem(k, JSON.stringify(v)),
+  };
+
+  function toast(msg, kind) {
+    const t = $("toast");
+    t.textContent = msg;
+    t.className = "toast show" + (kind ? " " + kind : "");
+    clearTimeout(toast._t);
+    toast._t = setTimeout(() => (t.className = "toast"), 2200);
+  }
+
+  /* Short beep via WebAudio (no asset file needed) */
+  let audioCtx = null;
+  function beep() {
+    try {
+      audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+      const o = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      o.type = "square";
+      o.frequency.value = 880;
+      g.gain.value = 0.08;
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start();
+      o.stop(audioCtx.currentTime + 0.12);
+    } catch (e) { /* audio not allowed — ignore */ }
+  }
+  function buzz() { try { navigator.vibrate && navigator.vibrate(120); } catch (e) {} }
+
+  /* ---------- Session state ---------- */
+  // Generate a session id (time-based + random suffix) once per "start".
+  function newSessionId() {
+    const d = new Date();
+    const pad = (n) => String(n).padStart(2, "0");
+    const stamp = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+    return `S${stamp}-${Math.random().toString(36).slice(2, 6)}`;
+  }
+
+  const state = {
+    userName: "",
+    location: "",
+    sessionId: "",
+    // Per-session client-side memory of scanned barcodes: { barcode: qty }
+    scanned: {},
+    currentBarcode: "",
+    itemsCount: 0,
+    totalQty: 0,
+    configMap: {},         // barcode -> { item_name, expected_qty }
+    scanning: false,
+  };
+
+  let html5Qr = null;      // html5-qrcode instance
+
+  /* ---------- Config lookup (loaded once, cached) ---------- */
+  async function loadConfig() {
+    // Try network; fall back to cached copy so item names work offline.
+    try {
+      const res = await fetch(`${APPS_SCRIPT_URL}?action=config`, { method: "GET" });
+      const data = await res.json();
+      if (data && data.ok && Array.isArray(data.rows)) {
+        const map = {};
+        data.rows.forEach((r) => {
+          if (r.barcode) map[String(r.barcode).trim()] = { item_name: r.item_name || "", expected_qty: r.expected_qty };
+        });
+        state.configMap = map;
+        LS.set("configMap", map);
+      }
+    } catch (e) {
+      state.configMap = LS.get("configMap", {});   // offline fallback
+    }
+  }
+
+  /* ============================================================
+   *  SCREEN 1 — Session start
+   * ============================================================ */
+  function initSessionScreen() {
+    // Warn if the endpoint hasn't been configured.
+    if (APPS_SCRIPT_URL.indexOf("PASTE_YOUR") === 0) $("setupWarn").style.display = "block";
+
+    // Prefill from last time.
+    $("userName").value = LS.get("userName", "");
+    $("location").value = LS.get("location", "");
+
+    $("startSessionBtn").addEventListener("click", startSession);
+  }
+
+  async function startSession() {
+    const name = $("userName").value.trim();
+    const loc = $("location").value.trim();
+    if (!name) { toast("أدخل اسم الموظف", "err"); $("userName").focus(); return; }
+    if (!loc)  { toast("أدخل الموقع", "err"); $("location").focus(); return; }
+
+    state.userName = name;
+    state.location = loc;
+    state.sessionId = newSessionId();
+    state.scanned = {};
+    state.itemsCount = 0;
+    state.totalQty = 0;
+
+    LS.set("userName", name);
+    LS.set("location", loc);
+
+    $("whoLabel").textContent = `${name} — ${loc}`;
+    updateStats();
+
+    // Unlock audio on this user gesture (iOS requirement).
+    try { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); if (audioCtx.state === "suspended") audioCtx.resume(); } catch (e) {}
+
+    goto("screen-scan");
+    loadConfig();            // fire-and-forget; names appear when ready
+    await startScanner();
+  }
+
+  /* ============================================================
+   *  SCREEN 2 — Scan loop
+   * ============================================================ */
+  function initScanScreen() {
+    $("qtyMinus").addEventListener("click", () => bumpQty(-1));
+    $("qtyPlus").addEventListener("click", () => bumpQty(+1));
+    $("saveBtn").addEventListener("click", saveScan);
+    $("cancelScanBtn").addEventListener("click", () => { hideResult(); startScanner(); });
+    $("manualGoBtn").addEventListener("click", () => {
+      const code = $("manualBarcode").value.trim();
+      if (!code) { toast("اكتب الباركود", "err"); return; }
+      $("manualBarcode").value = "";
+      $("manualCard").open = false;
+      onBarcode(code);
+    });
+    $("endSessionBtn").addEventListener("click", endSession);
+  }
+
+  async function startScanner() {
+    hideResult();
+    $("scannerWrap").style.display = "block";
+    if (state.scanning) return;
+
+    const formats = [
+      Html5QrcodeSupportedFormats.EAN_13,
+      Html5QrcodeSupportedFormats.UPC_A,
+      Html5QrcodeSupportedFormats.UPC_E,
+      Html5QrcodeSupportedFormats.EAN_8,
+      Html5QrcodeSupportedFormats.CODE_128,
+      Html5QrcodeSupportedFormats.CODE_39,
+      Html5QrcodeSupportedFormats.QR_CODE,
+    ];
+
+    try {
+      html5Qr = html5Qr || new Html5Qrcode("reader", { formatsToSupport: formats, verbose: false });
+      await html5Qr.start(
+        { facingMode: "environment" },            // rear camera
+        { fps: 10, qrbox: { width: 250, height: 160 }, aspectRatio: 1.3333 },
+        (decodedText) => { onBarcode(decodedText); },
+        () => { /* per-frame decode failure — ignore, this fires constantly */ }
+      );
+      state.scanning = true;
+      $("scanHint").textContent = "وجّه الكاميرا نحو الباركود…";
+    } catch (err) {
+      state.scanning = false;
+      $("scanHint").textContent = "تعذّر فتح الكاميرا. استخدم الإدخال اليدوي بالأسفل.";
+      $("manualCard").open = true;
+      toast("تعذّر فتح الكاميرا", "err");
+    }
+  }
+
+  async function stopScanner() {
+    if (html5Qr && state.scanning) {
+      try { await html5Qr.stop(); } catch (e) {}
+      state.scanning = false;
+    }
+  }
+
+  // Called on every successful decode (or manual entry).
+  async function onBarcode(code) {
+    code = String(code).trim();
+    if (!code) return;
+
+    beep(); buzz();
+    await stopScanner();
+    $("scannerWrap").style.display = "none";
+
+    state.currentBarcode = code;
+    $("resCode").textContent = code;
+
+    // Item name from config (or "undefined item").
+    const cfg = state.configMap[code];
+    const nameEl = $("resName");
+    if (cfg && cfg.item_name) {
+      nameEl.textContent = cfg.item_name;
+      nameEl.className = "name";
+    } else {
+      nameEl.textContent = "صنف غير معرّف";
+      nameEl.className = "name unknown";
+    }
+
+    // Duplicate handling (client-side session memory).
+    const dupEl = $("dupWarn");
+    if (Object.prototype.hasOwnProperty.call(state.scanned, code)) {
+      const prev = state.scanned[code];
+      dupEl.innerHTML =
+        `تم مسح هذا الباركود من قبل (الكمية السابقة: <b>${prev}</b>).<br>` +
+        `اختر: <b>إضافة</b> للكمية الحالية أم <b>استبدالها</b>؟`;
+      dupEl.classList.add("show");
+      // Two action buttons injected once
+      dupEl.dataset.mode = "add";           // default action = add
+      buildDupButtons(code, prev);
+    } else {
+      dupEl.classList.remove("show");
+      dupEl.innerHTML = "";
+      dupEl.removeAttribute("data-mode");
+    }
+
+    $("qtyInput").value = "1";
+    $("resultWrap").style.display = "block";
+    // Auto-focus quantity so the user can type immediately.
+    setTimeout(() => { $("qtyInput").focus(); $("qtyInput").select(); }, 120);
+  }
+
+  // Build add/replace choice buttons inside the duplicate banner.
+  function buildDupButtons(code, prev) {
+    const dupEl = $("dupWarn");
+    const wrap = document.createElement("div");
+    wrap.className = "row";
+    wrap.style.marginTop = "10px";
+
+    const addBtn = document.createElement("button");
+    addBtn.className = "btn warn";
+    addBtn.textContent = "إضافة للكمية";
+    addBtn.onclick = () => { dupEl.dataset.mode = "add"; markDupChoice(addBtn, repBtn); };
+
+    const repBtn = document.createElement("button");
+    repBtn.className = "btn ghost";
+    repBtn.textContent = "استبدال";
+    repBtn.onclick = () => { dupEl.dataset.mode = "replace"; markDupChoice(repBtn, addBtn); };
+
+    wrap.appendChild(addBtn);
+    wrap.appendChild(repBtn);
+    dupEl.appendChild(wrap);
+    markDupChoice(addBtn, repBtn); // default highlight = add
+  }
+  function markDupChoice(active, other) {
+    active.className = "btn warn";
+    other.className = "btn ghost";
+  }
+
+  function bumpQty(delta) {
+    const el = $("qtyInput");
+    let v = parseInt(el.value, 10);
+    if (isNaN(v)) v = 0;
+    v = Math.max(1, v + delta);      // never below 1
+    el.value = v;
+  }
+
+  async function saveScan() {
+    const code = state.currentBarcode;
+    let qty = parseInt($("qtyInput").value, 10);
+    if (isNaN(qty) || qty < 1) { toast("أدخل كمية صحيحة", "err"); return; }
+
+    const dupEl = $("dupWarn");
+    const isDup = dupEl.classList.contains("show");
+    const mode = isDup ? (dupEl.dataset.mode || "add") : "new";
+
+    const saveBtn = $("saveBtn");
+    saveBtn.disabled = true;
+    saveBtn.textContent = "جارٍ الحفظ…";
+
+    // Build the payload the server understands.
+    const payload = {
+      action: mode === "replace" ? "replace" : "scan",
+      barcode: code,
+      quantity: qty,
+      user_name: state.userName,
+      location: state.location,
+      session_id: state.sessionId,
+    };
+
+    try {
+      const res = await fetch(APPS_SCRIPT_URL, {
+        method: "POST",
+        // text/plain avoids the CORS preflight; server parses JSON.
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!data || !data.ok) throw new Error(data && data.error ? data.error : "server error");
+
+      // Update client-side session memory + stats.
+      applyLocalCount(code, qty, mode);
+      toast("تم الحفظ ✓", "ok");
+      hideResult();
+      startScanner();
+    } catch (err) {
+      // Phase 1: surface the failure. (Phase 2 will queue offline.)
+      toast("فشل الحفظ — تحقق من الاتصال", "err");
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.textContent = "حفظ ومسح التالي ✓";
+    }
+  }
+
+  // Keep local counters + duplicate memory in sync with what we saved.
+  function applyLocalCount(code, qty, mode) {
+    const existed = Object.prototype.hasOwnProperty.call(state.scanned, code);
+    const prev = existed ? state.scanned[code] : 0;
+
+    if (mode === "replace") {
+      state.totalQty += (qty - prev);
+      state.scanned[code] = qty;
+    } else if (mode === "add" || existed) {
+      state.totalQty += qty;
+      state.scanned[code] = prev + qty;
+    } else {
+      state.totalQty += qty;
+      state.scanned[code] = qty;
+    }
+    state.itemsCount = Object.keys(state.scanned).length;
+    updateStats();
+  }
+
+  function updateStats() {
+    $("statItems").textContent = state.itemsCount;
+    $("statQty").textContent = state.totalQty;
+  }
+
+  function hideResult() {
+    $("resultWrap").style.display = "none";
+    const dupEl = $("dupWarn");
+    dupEl.classList.remove("show");
+    dupEl.innerHTML = "";
+  }
+
+  async function endSession() {
+    await stopScanner();
+    goto("screen-session");
+    toast("تم إنهاء الجلسة");
+  }
+
+  /* ---------- Screen navigation ---------- */
+  function goto(id) {
+    document.querySelectorAll(".screen").forEach((s) => s.classList.remove("active"));
+    $(id).classList.add("active");
+    window.scrollTo(0, 0);
+  }
+
+  /* ---------- Boot ---------- */
+  initSessionScreen();
+  initScanScreen();
+  </script>
+</body>
+</html>
